@@ -26,8 +26,8 @@ async function spawnWorker(id) {
             
             // بحث ذكي عن مسار الكروم في Render أو أي سيرفر Linux
             // التحقق من المسارات المتاحة لمنع خطأ "executable not found"
-            browser = await puppeteer.launch({
-    executablePath: puppeteer.executablePath(),
+            const browser = await puppeteer.launch({
+    executablePath: "/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome",
     headless: "new",
     args: [
         "--no-sandbox",
