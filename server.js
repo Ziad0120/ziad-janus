@@ -60,31 +60,52 @@ async function spawnWorker(id) {
             });
 
             // محاكاة سكربت التيمبرمونكي داخل الصفحة
+            // ... (باقي الكود كما هو)
+
+            // محاكاة سكربت التيمبرمونكي مع سجلات فحص مفصلة
             await page.evaluate(() => {
                 const TOKEN_INTERVAL = 5000;
-                const PAGE_REFRESH_INTERVAL = 2 * 60 * 1000;
-
+                
                 function requestToken() {
                     try {
-                        if (!window.turnstile) return;
+                        console.log("[Browser] Attempting to find Turnstile container...");
                         const container = document.querySelector("#cf-turnstile");
-                        if (!container) return;
                         
-                        // إعادة تهيئة العنصر كما يفعل السكربت الأصلي
+                        if (!container) {
+                            console.log("[Browser] Error: #cf-turnstile container NOT FOUND in DOM!");
+                            return;
+                        }
+                        
+                        if (!window.turnstile) {
+                            console.log("[Browser] Error: window.turnstile object NOT FOUND! Cloudflare script might be blocked.");
+                            return;
+                        }
+
+                        console.log("[Browser] Turnstile found, rendering...");
                         container.innerHTML = "";
                         window.turnstile.render(container, {
                             sitekey: "0x4AAAAAABBPKaIbNwnPEfSo",
-                            callback: (token) => window.reportToken(token)
+                            callback: (token) => {
+                                console.log("[Browser] SUCCESS: Turnstile callback fired!");
+                                window.reportToken(token);
+                            },
+                            "error-callback": (err) => {
+                                console.log("[Browser] FAILURE: Turnstile reported error:", err);
+                            }
                         });
-                        console.log("Turnstile requested successfully.");
-                    } catch (e) { console.error("Turnstile error:", e); }
+                    } catch (e) { 
+                        console.error("[Browser] Critical JS Error:", e); 
+                    }
                 }
 
-                // تنفيذ دوري
+                // إضافة فحص أولي للتحقق من أن الموقع هو نفسه الذي نتوقعه
+                console.log("[Browser] Current URL:", window.location.href);
                 requestToken();
                 setInterval(requestToken, TOKEN_INTERVAL);
-                setTimeout(() => location.reload(), PAGE_REFRESH_INTERVAL);
             });
+
+// ... (باقي الكود كما هو)
+
 
             workerStatus[id] = "Active & Mining";
             
