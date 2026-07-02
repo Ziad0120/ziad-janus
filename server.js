@@ -99,5 +99,5 @@ app.get("/status", (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`🚀 Janus Production Engine running on port ${PORT}`);
-    [1, 2, 3].forEach(spawnWorker);
+spawnWorker(1);
 });
