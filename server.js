@@ -27,7 +27,7 @@ async function spawnWorker(id) {
             // بحث ذكي عن مسار الكروم في Render أو أي سيرفر Linux
             // التحقق من المسارات المتاحة لمنع خطأ "executable not found"
             console.log("Executable:", puppeteer.executablePath());
-            const browser = await puppeteer.launch({
+             browser = await puppeteer.launch({
     executablePath: puppeteer.executablePath(),
     headless: "new",
     args: [
@@ -47,19 +47,46 @@ async function spawnWorker(id) {
             await page.goto('https://gartic.io/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
             // حقن وظيفة التخزين المباشر من المتصفح إلى السيرفر
-            await page.exposeFunction('reportToken', (token) => {
-                tokens.set(token, Date.now());
-                console.log(`[${new Date().toLocaleTimeString()}] Worker ${id} captured token`);
+            await page.exposeFunction("reportToken", (token) => {
+    if (!tokens.has(token)) {
+        tokens.set(token, Date.now());
+        console.log(`[Worker ${id}] Token captured (${tokens.size})`);
+    }
+});
+
+await page.evaluate(() => {
+
+    const TOKEN_INTERVAL = 5000;
+    const PAGE_REFRESH_INTERVAL = 2 * 60 * 1000;
+
+    function requestToken() {
+        try {
+
+            if (!window.turnstile) return;
+
+            const container = document.querySelector("#cf-turnstile");
+            if (!container) return;
+
+            container.innerHTML = "";
+
+            window.turnstile.render(container, {
+                sitekey: "0x4AAAAAABBPKaIbNwnPEfSo",
+                callback: function(token) {
+                    window.reportToken(token);
+                }
             });
 
-            // مراقبة التغيرات في الصفحة لالتقاط التوكن بمجرد ظهوره
-            await page.evaluate(() => {
-                const observer = new MutationObserver(() => {
-                    const token = window.turnstile?.getResponse();
-                    if (token) window.reportToken(token);
-                });
-                observer.observe(document.body, { childList: true, subtree: true });
-            });
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    requestToken();
+    setInterval(requestToken, TOKEN_INTERVAL);
+
+    setTimeout(() => location.reload(), PAGE_REFRESH_INTERVAL);
+
+});
 
             workerStatus[id] = "Active & Mining";
             
