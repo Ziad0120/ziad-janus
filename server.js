@@ -3,7 +3,7 @@ const cors = require("cors");
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// تفعيل التمويه لتجاوز الحظر
+// تفعيل ميزة التمويه
 puppeteer.use(StealthPlugin());
 
 const app = express();
@@ -15,19 +15,23 @@ let workerStatus = { 1: "Starting", 2: "Starting", 3: "Starting" };
 
 app.use(cors());
 
-// --- 1. الوظائف الأساسية ---
+// --- 1. الوظائف الأساسية (التنظيف والتخزين) ---
 const cleanup = () => {
-    const limit = Date.now() - 5 * 60 * 1000;
-    for (let [token, time] of tokens) if (time < limit) tokens.delete(token);
+    const limit = Date.now() - 5 * 60 * 1000; // 5 دقائق
+    for (let [token, time] of tokens) {
+        if (time < limit) tokens.delete(token);
+    }
 };
-setInterval(cleanup, 60 * 1000);
+setInterval(cleanup, 60 * 1000); // تنظيف كل دقيقة
 
-// --- 2. محرك الإنتاج الذكي (3 عمال) ---
+// --- 2. محرك الإنتاج المحاكي لسكربت التيمبرمونكي ---
 async function spawnWorker(id) {
     const run = async () => {
         let browser;
         try {
             workerStatus[id] = "Launching...";
+            console.log(`[Worker ${id}] Launching browser...`);
+            
             browser = await puppeteer.launch({
                 headless: "new",
                 args: [
@@ -35,6 +39,7 @@ async function spawnWorker(id) {
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
+                    "--single-process", // تقليل استهلاك الرام
                     "--no-zygote",
                     "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 ]
@@ -46,42 +51,53 @@ async function spawnWorker(id) {
             workerStatus[id] = "Navigating...";
             await page.goto('https://gartic.io/', { waitUntil: 'domcontentloaded' });
 
-            // دالة التقرير
+            // دالة الإبلاغ من المتصفح إلى السيرفر
             await page.exposeFunction("reportToken", (token) => {
                 if (!tokens.has(token)) {
                     tokens.set(token, Date.now());
-                    console.log(`[Worker ${id}] Token captured! Total: ${tokens.size}`);
+                    console.log(`[Worker ${id}] SUCCESS! Token Captured. Total: ${tokens.size}`);
                 }
             });
 
-            // حقن السكربت الذكي داخل الصفحة
+            // محاكاة سكربت التيمبرمونكي داخل الصفحة
             await page.evaluate(() => {
-                const requestToken = () => {
+                const TOKEN_INTERVAL = 5000;
+                const PAGE_REFRESH_INTERVAL = 2 * 60 * 1000;
+
+                function requestToken() {
                     try {
+                        if (!window.turnstile) return;
                         const container = document.querySelector("#cf-turnstile");
-                        if (window.turnstile && container) {
-                            window.turnstile.render(container, {
-                                sitekey: "0x4AAAAAABBPKaIbNwnPEfSo",
-                                callback: (token) => window.reportToken(token)
-                            });
-                        }
-                    } catch (e) { console.error(e); }
-                };
-                
+                        if (!container) return;
+                        
+                        // إعادة تهيئة العنصر كما يفعل السكربت الأصلي
+                        container.innerHTML = "";
+                        window.turnstile.render(container, {
+                            sitekey: "0x4AAAAAABBPKaIbNwnPEfSo",
+                            callback: (token) => window.reportToken(token)
+                        });
+                        console.log("Turnstile requested successfully.");
+                    } catch (e) { console.error("Turnstile error:", e); }
+                }
+
+                // تنفيذ دوري
                 requestToken();
-                setInterval(requestToken, 5000);
-                setTimeout(() => location.reload(), 2 * 60 * 1000);
+                setInterval(requestToken, TOKEN_INTERVAL);
+                setTimeout(() => location.reload(), PAGE_REFRESH_INTERVAL);
             });
 
             workerStatus[id] = "Active & Mining";
+            
+            // انتظر 3 دقائق ثم أعد التشغيل لتفريغ الرام
             await new Promise(r => setTimeout(r, 3 * 60 * 1000)); 
 
         } catch (e) {
             workerStatus[id] = `Error: ${e.message}`;
+            console.error(`[Worker ${id}] CRITICAL ERROR: ${e.message}`);
         } finally {
             if (browser) await browser.close();
             workerStatus[id] = "Restarting...";
-            setTimeout(run, 5000);
+            setTimeout(run, 5000); // إعادة المحاولة بعد 5 ثواني
         }
     };
     run();
@@ -90,8 +106,12 @@ async function spawnWorker(id) {
 // --- 3. نقاط التوزيع (API) ---
 app.get("/add-token", (req, res) => {
     const { token } = req.query;
-    if (token) tokens.set(token, Date.now());
-    res.sendStatus(200);
+    if (token) {
+        tokens.set(token, Date.now());
+        res.sendStatus(200);
+    } else {
+        res.status(400).send("No token provided");
+    }
 });
 
 app.get("/copy-tokens", (req, res) => {
@@ -108,8 +128,9 @@ app.get("/status", (req, res) => {
     res.json({ serverTime: new Date().toISOString(), workers: workerStatus, totalTokens: tokens.size });
 });
 
+// تشغيل السيرفر و العمال الثلاثة
 app.listen(PORT, () => {
     console.log(`🚀 Janus Production Engine running on port ${PORT}`);
     spawnWorker(1);
-    
+   
 });
