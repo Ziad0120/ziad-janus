@@ -25,12 +25,16 @@ async function spawnWorker(id) {
             workerStatus[id] = "Launching...";
             
             // بحث ذكي عن مسار الكروم في Render أو أي سيرفر Linux
+            // التحقق من المسارات المتاحة لمنع خطأ "executable not found"
             const chromePaths = [
                 process.env.PUPPETEER_EXECUTABLE_PATH,
                 '/usr/bin/google-chrome',
                 '/usr/bin/chromium',
-                '/usr/bin/chromium-browser'
+                '/usr/bin/chromium-browser',
+                '/usr/bin/google-chrome-stable'
             ];
+            
+            // استخدام fs.existsSync للتأكد من وجود الملف فعلياً قبل محاولة التشغيل
             const executablePath = chromePaths.find(p => p && fs.existsSync(p));
 
             browser = await puppeteer.launch({ 
@@ -46,15 +50,19 @@ async function spawnWorker(id) {
             });
 
             const page = await browser.newPage();
+            // ضبط وقت انتظار محدد للـ Navigation لضمان عدم تعليق العامل
+            await page.setDefaultNavigationTimeout(60000); 
+            
             workerStatus[id] = "Navigating...";
             await page.goto('https://gartic.io/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-            // حقن وظيفة التخزين المباشر
+            // حقن وظيفة التخزين المباشر من المتصفح إلى السيرفر
             await page.exposeFunction('reportToken', (token) => {
                 tokens.set(token, Date.now());
                 console.log(`[${new Date().toLocaleTimeString()}] Worker ${id} captured token`);
             });
 
+            // مراقبة التغيرات في الصفحة لالتقاط التوكن بمجرد ظهوره
             await page.evaluate(() => {
                 const observer = new MutationObserver(() => {
                     const token = window.turnstile?.getResponse();
@@ -64,19 +72,24 @@ async function spawnWorker(id) {
             });
 
             workerStatus[id] = "Active & Mining";
-            await new Promise(r => setTimeout(r, 3 * 60 * 1000)); // دورة عمل 3 دقائق
+            
+            // دورة عمل محددة (3 دقائق) ثم إجبار المتصفح على الإغلاق للتنظيف
+            await new Promise(r => setTimeout(r, 3 * 60 * 1000)); 
 
         } catch (e) {
             workerStatus[id] = `Error: ${e.message}`;
             console.error(`Worker ${id} Error: ${e.message}`);
         } finally {
+            // إغلاق المتصفح لضمان عدم وجود عمليات معلقة (Zombie Processes)
             if (browser) await browser.close();
             workerStatus[id] = "Restarting...";
-            setTimeout(run, 5000); // إعادة محاولة بعد 5 ثواني
+            // استراتيجية إعادة المحاولة (Backoff) بعد 5 ثواني
+            setTimeout(run, 5000); 
         }
     };
     run();
 }
+
 
 // --- 3. نقاط التوزيع (API) ---
 app.get("/add-token", (req, res) => {
