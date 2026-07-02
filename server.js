@@ -30,8 +30,6 @@ async function spawnWorker(id) {
         let browser;
         try {
             workerStatus[id] = "Launching...";
-            console.log(`[Worker ${id}] Launching browser...`);
-            
             browser = await puppeteer.launch({
                 headless: "new",
                 args: [
@@ -39,90 +37,81 @@ async function spawnWorker(id) {
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
-                    "--single-process", // تقليل استهلاك الرام
+                    "--single-process",
                     "--no-zygote",
                     "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 ]
             });
 
             const page = await browser.newPage();
-            await page.setDefaultNavigationTimeout(60000);
             
-            workerStatus[id] = "Navigating...";
-            await page.goto('https://gartic.io/', { waitUntil: 'domcontentloaded' });
-
-            // دالة الإبلاغ من المتصفح إلى السيرفر
+            // دالة استلام التوكن من الـ iframe وإرساله للسيرفر
             await page.exposeFunction("reportToken", (token) => {
                 if (!tokens.has(token)) {
                     tokens.set(token, Date.now());
-                    console.log(`[Worker ${id}] SUCCESS! Token Captured. Total: ${tokens.size}`);
+                    console.log(`[Worker ${id}] SUCCESS! Token Captured via Iframe. Total: ${tokens.size}`);
                 }
             });
 
-            // محاكاة سكربت التيمبرمونكي داخل الصفحة
-            // ... (باقي الكود كما هو)
+            await page.goto('https://gartic.io/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-            // محاكاة سكربت التيمبرمونكي مع سجلات فحص مفصلة
+            // دمج منطق الـ iframe المطور داخل السيرفر
             await page.evaluate(() => {
-                const TOKEN_INTERVAL = 5000;
-                
-                function requestToken() {
-                    try {
-                        console.log("[Browser] Attempting to find Turnstile container...");
-                        const container = document.querySelector("#cf-turnstile");
-                        
-                        if (!container) {
-                            console.log("[Browser] Error: #cf-turnstile container NOT FOUND in DOM!");
-                            return;
-                        }
-                        
-                        if (!window.turnstile) {
-                            console.log("[Browser] Error: window.turnstile object NOT FOUND! Cloudflare script might be blocked.");
-                            return;
-                        }
+                function createTurnstileFrame() {
+                    console.log("[Browser] Creating Turnstile Iframe...");
+                    const iframe = document.createElement("iframe");
+                    iframe.style.display = "none";
+                    iframe.sandbox = "allow-scripts allow-same-origin";
+                    document.body.appendChild(iframe);
 
-                        console.log("[Browser] Turnstile found, rendering...");
-                        container.innerHTML = "";
-                        window.turnstile.render(container, {
-                            sitekey: "0x4AAAAAABBPKaIbNwnPEfSo",
-                            callback: (token) => {
-                                console.log("[Browser] SUCCESS: Turnstile callback fired!");
-                                window.reportToken(token);
-                            },
-                            "error-callback": (err) => {
-                                console.log("[Browser] FAILURE: Turnstile reported error:", err);
-                            }
-                        });
-                    } catch (e) { 
-                        console.error("[Browser] Critical JS Error:", e); 
-                    }
+                    const html = `
+                        <!DOCTYPE html>
+                        <html>
+                        <head><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script></head>
+                        <body>
+                            <div id="cf-turnstile"></div>
+                            <script>
+                                window.onload = function() {
+                                    turnstile.render("#cf-turnstile", {
+                                        sitekey: "0x4AAAAAABBPKaIbNwnPEfSo",
+                                        callback: function(token) {
+                                            // إرسال التوكن مباشرة للسيرفر عبر الدالة المكشوفة
+                                            window.parent.reportToken(token);
+                                        }
+                                    });
+                                }
+                            </script>
+                        </body>
+                        </html>
+                    `;
+                    iframe.srcdoc = html;
                 }
 
-                // إضافة فحص أولي للتحقق من أن الموقع هو نفسه الذي نتوقعه
-                console.log("[Browser] Current URL:", window.location.href);
-                requestToken();
-                setInterval(requestToken, TOKEN_INTERVAL);
+                // التكرار وإعادة التحميل كما في سكربت التيمبرمونكي
+                setInterval(createTurnstileFrame, 5000);
+                createTurnstileFrame();
+                
+                setTimeout(() => {
+                    console.log("[Browser] Refreshing page...");
+                    location.reload();
+                }, 2 * 60 * 1000);
             });
-
-// ... (باقي الكود كما هو)
-
 
             workerStatus[id] = "Active & Mining";
-            
-            // انتظر 3 دقائق ثم أعد التشغيل لتفريغ الرام
             await new Promise(r => setTimeout(r, 3 * 60 * 1000)); 
 
         } catch (e) {
             workerStatus[id] = `Error: ${e.message}`;
-            console.error(`[Worker ${id}] CRITICAL ERROR: ${e.message}`);
+            console.error(`[Worker ${id}] ERROR: ${e.message}`);
         } finally {
             if (browser) await browser.close();
             workerStatus[id] = "Restarting...";
-            setTimeout(run, 5000); // إعادة المحاولة بعد 5 ثواني
+            setTimeout(run, 5000);
         }
     };
     run();
 }
+
 
 // --- 3. نقاط التوزيع (API) ---
 app.get("/add-token", (req, res) => {
