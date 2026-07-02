@@ -30,6 +30,8 @@ async function spawnWorker(id) {
         let browser;
         try {
             workerStatus[id] = "Launching...";
+            console.log(`[Worker ${id}] Launching browser...`);
+            
             browser = await puppeteer.launch({
                 headless: "new",
                 args: [
@@ -45,18 +47,33 @@ async function spawnWorker(id) {
 
             const page = await browser.newPage();
             
-            // دالة استلام التوكن من الـ iframe وإرساله للسيرفر
+            // 1. الجسر: السيرفر ينتظر استقبال توكن عبر دالة reportToken
             await page.exposeFunction("reportToken", (token) => {
-                if (!tokens.has(token)) {
-                    tokens.set(token, Date.now());
-                    console.log(`[Worker ${id}] SUCCESS! Token Captured via Iframe. Total: ${tokens.size}`);
+                if (token && typeof token === 'string' && token.length > 20) {
+                    if (!tokens.has(token)) {
+                        tokens.set(token, Date.now());
+                        console.log(`[Worker ${id}] SUCCESS! Token Captured. Current Map Size: ${tokens.size}`);
+                    }
+                } else {
+                    console.log(`[Worker ${id}] FAILED! Received invalid token data.`);
                 }
             });
 
+            console.log(`[Worker ${id}] Navigating to Gartic.io...`);
             await page.goto('https://gartic.io/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-            // دمج منطق الـ iframe المطور داخل السيرفر
+            // 2. المحرك: حقن الـ iframe و التنصت على الرسائل
             await page.evaluate(() => {
+                console.log("[Browser] Injecting Token Fetcher...");
+
+                // التعديل: التنصت على الرسائل القادمة من الـ iframe
+                window.addEventListener("message", (event) => {
+                    if (typeof event.data === "string" && event.data.length > 20) {
+                        console.log("[Browser] Message received from iframe, reporting to server...");
+                        window.reportToken(event.data);
+                    }
+                });
+
                 function createTurnstileFrame() {
                     console.log("[Browser] Creating Turnstile Iframe...");
                     const iframe = document.createElement("iframe");
@@ -64,37 +81,28 @@ async function spawnWorker(id) {
                     iframe.sandbox = "allow-scripts allow-same-origin";
                     document.body.appendChild(iframe);
 
-                    const html = `
-                        <!DOCTYPE html>
+                    iframe.srcdoc = `
                         <html>
-                        <head><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script></head>
                         <body>
                             <div id="cf-turnstile"></div>
+                            <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
                             <script>
-                                window.onload = function() {
-                                    turnstile.render("#cf-turnstile", {
-                                        sitekey: "0x4AAAAAABBPKaIbNwnPEfSo",
-                                        callback: function(token) {
-                                            // إرسال التوكن مباشرة للسيرفر عبر الدالة المكشوفة
-                                            window.parent.reportToken(token);
-                                        }
-                                    });
-                                }
+                                turnstile.render("#cf-turnstile", {
+                                    sitekey: "0x4AAAAAABBPKaIbNwnPEfSo",
+                                    callback: function(token) {
+                                        window.parent.postMessage(token, "*");
+                                    }
+                                });
                             </script>
                         </body>
                         </html>
                     `;
-                    iframe.srcdoc = html;
                 }
 
-                // التكرار وإعادة التحميل كما في سكربت التيمبرمونكي
                 setInterval(createTurnstileFrame, 5000);
                 createTurnstileFrame();
                 
-                setTimeout(() => {
-                    console.log("[Browser] Refreshing page...");
-                    location.reload();
-                }, 2 * 60 * 1000);
+                setTimeout(() => location.reload(), 2 * 60 * 1000);
             });
 
             workerStatus[id] = "Active & Mining";
@@ -102,7 +110,7 @@ async function spawnWorker(id) {
 
         } catch (e) {
             workerStatus[id] = `Error: ${e.message}`;
-            console.error(`[Worker ${id}] ERROR: ${e.message}`);
+            console.error(`[Worker ${id}] CRITICAL ERROR: ${e.message}`);
         } finally {
             if (browser) await browser.close();
             workerStatus[id] = "Restarting...";
