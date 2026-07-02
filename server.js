@@ -26,28 +26,17 @@ async function spawnWorker(id) {
             
             // بحث ذكي عن مسار الكروم في Render أو أي سيرفر Linux
             // التحقق من المسارات المتاحة لمنع خطأ "executable not found"
-            const chromePaths = [
-                process.env.PUPPETEER_EXECUTABLE_PATH,
-                '/usr/bin/google-chrome',
-                '/usr/bin/chromium',
-                '/usr/bin/chromium-browser',
-                '/usr/bin/google-chrome-stable'
-            ];
-            
-            // استخدام fs.existsSync للتأكد من وجود الملف فعلياً قبل محاولة التشغيل
-            const executablePath = chromePaths.find(p => p && fs.existsSync(p));
-
-            browser = await puppeteer.launch({ 
-                headless: "new",
-                executablePath: executablePath,
-                args: [
-                    '--no-sandbox', 
-                    '--disable-setuid-sandbox', 
-                    '--disable-dev-shm-usage', 
-                    '--disable-gpu', 
-                    '--no-zygote'
-                ] 
-            });
+            browser = await puppeteer.launch({
+    executablePath: puppeteer.executablePath(),
+    headless: "new",
+    args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-zygote"
+    ]
+});
 
             const page = await browser.newPage();
             // ضبط وقت انتظار محدد للـ Navigation لضمان عدم تعليق العامل
