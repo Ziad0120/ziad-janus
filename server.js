@@ -66,7 +66,7 @@ async function spawnWorker(id) {
             await page.evaluate(() => {
                 console.log("[Browser] Injecting Token Fetcher...");
 
-                // التعديل: التنصت على الرسائل القادمة من الـ iframe
+                // التنصت على الرسائل القادمة من الـ iframe
                 window.addEventListener("message", (event) => {
                     if (typeof event.data === "string" && event.data.length > 20) {
                         console.log("[Browser] Message received from iframe, reporting to server...");
@@ -81,17 +81,20 @@ async function spawnWorker(id) {
                     iframe.sandbox = "allow-scripts allow-same-origin";
                     document.body.appendChild(iframe);
 
+                    // استخدام srcdoc مع دالة تعيين جاهزة
                     iframe.srcdoc = `
                         <html>
                         <body>
                             <div id="cf-turnstile"></div>
                             <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
                             <script>
-                                turnstile.render("#cf-turnstile", {
-                                    sitekey: "0x4AAAAAABBPKaIbNwnPEfSo",
-                                    callback: function(token) {
-                                        window.parent.postMessage(token, "*");
-                                    }
+                                turnstile.ready(function () {
+                                    turnstile.render("#cf-turnstile", {
+                                        sitekey: "0x4AAAAAABBPKaIbNwnPEfSo",
+                                        callback: function(token) {
+                                            window.parent.postMessage(token, "*");
+                                        }
+                                    });
                                 });
                             </script>
                         </body>
@@ -99,26 +102,15 @@ async function spawnWorker(id) {
                     `;
                 }
 
+                // تنفيذ دوري لإنشاء الـ iframe وإعادة تحميل الصفحة
                 setInterval(createTurnstileFrame, 5000);
                 createTurnstileFrame();
                 
                 setTimeout(() => location.reload(), 2 * 60 * 1000);
             });
 
-            workerStatus[id] = "Active & Mining";
-            await new Promise(r => setTimeout(r, 3 * 60 * 1000)); 
+            workerStatus[id] = "Active
 
-        } catch (e) {
-            workerStatus[id] = `Error: ${e.message}`;
-            console.error(`[Worker ${id}] CRITICAL ERROR: ${e.message}`);
-        } finally {
-            if (browser) await browser.close();
-            workerStatus[id] = "Restarting...";
-            setTimeout(run, 5000);
-        }
-    };
-    run();
-}
 
 
 // --- 3. نقاط التوزيع (API) ---
