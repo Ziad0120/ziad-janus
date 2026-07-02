@@ -1,14 +1,21 @@
 const express = require("express");
 const cors = require("cors");
 const puppeteer = require('puppeteer');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 let tokens = new Map();
 let workerStatus = { 1: "Starting", 2: "Starting", 3: "Starting" };
 
-// --- 1. إدارة الموارد ---
-process.on('SIGINT', async () => process.exit());
+app.use(cors());
+
+// --- 1. الوظائف الأساسية (التنظيف والتخزين) ---
+const cleanup = () => {
+    const limit = Date.now() - 5 * 60 * 1000; // 5 دقائق
+    for (let [token, time] of tokens) if (time < limit) tokens.delete(token);
+};
+setInterval(cleanup, 60 * 1000); // تنظيف كل دقيقة
 
 // --- 2. محرك الإنتاج الذكي ---
 async function spawnWorker(id) {
@@ -16,10 +23,19 @@ async function spawnWorker(id) {
         let browser;
         try {
             workerStatus[id] = "Launching...";
-            // استخدام المسار المباشر للكروم (مهم جداً على Render)
+            
+            // بحث ذكي عن مسار الكروم في Render أو أي سيرفر Linux
+            const chromePaths = [
+                process.env.PUPPETEER_EXECUTABLE_PATH,
+                '/usr/bin/google-chrome',
+                '/usr/bin/chromium',
+                '/usr/bin/chromium-browser'
+            ];
+            const executablePath = chromePaths.find(p => p && fs.existsSync(p));
+
             browser = await puppeteer.launch({ 
                 headless: "new",
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome',
+                executablePath: executablePath,
                 args: [
                     '--no-sandbox', 
                     '--disable-setuid-sandbox', 
@@ -33,7 +49,7 @@ async function spawnWorker(id) {
             workerStatus[id] = "Navigating...";
             await page.goto('https://gartic.io/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-            // كود الحقن: يراقب ظهور التوكن ويرسله فوراً للسيرفر
+            // حقن وظيفة التخزين المباشر
             await page.exposeFunction('reportToken', (token) => {
                 tokens.set(token, Date.now());
                 console.log(`[${new Date().toLocaleTimeString()}] Worker ${id} captured token`);
@@ -48,7 +64,7 @@ async function spawnWorker(id) {
             });
 
             workerStatus[id] = "Active & Mining";
-            await new Promise(r => setTimeout(r, 3 * 60 * 1000)); // يعمل 3 دقائق ثم يعيد التدوير
+            await new Promise(r => setTimeout(r, 3 * 60 * 1000)); // دورة عمل 3 دقائق
 
         } catch (e) {
             workerStatus[id] = `Error: ${e.message}`;
@@ -56,26 +72,21 @@ async function spawnWorker(id) {
         } finally {
             if (browser) await browser.close();
             workerStatus[id] = "Restarting...";
-            setTimeout(run, 5000); // Backoff strategy
+            setTimeout(run, 5000); // إعادة محاولة بعد 5 ثواني
         }
     };
     run();
 }
 
-// --- 3. نقاط الوصول ---
-app.use(cors());
-
+// --- 3. نقاط التوزيع (API) ---
 app.get("/add-token", (req, res) => {
     const { token } = req.query;
-    if (token) {
-        tokens.set(token, Date.now());
-    }
+    if (token) tokens.set(token, Date.now());
     res.sendStatus(200);
 });
 
 app.get("/copy-tokens", (req, res) => {
-    const limit = Date.now() - 5 * 60 * 1000;
-    for (let [token, time] of tokens) if (time < limit) tokens.delete(token);
+    cleanup();
     res.json({ tokens: Array.from(tokens.keys()), count: tokens.size });
 });
 
@@ -87,4 +98,3 @@ app.listen(PORT, () => {
     console.log(`🚀 Janus Production Engine running on port ${PORT}`);
     [1, 2, 3].forEach(spawnWorker);
 });
-
