@@ -4,7 +4,6 @@ const bodyParser = require("body-parser");
 const puppeteer = require("puppeteer");
 
 const app = express();
-const PORT = 3000;
 
 // إصلاح: تعريف CORS مرة واحدة فقط
 const corsOptions = {
@@ -26,7 +25,7 @@ const removeExpiredTokens = () => {
 
 // --- المصنع (Puppeteer) ---
 async function startFactory() {
-    const browser = await puppeteer.launch({ headless: false });
+    const browser = await puppeteer.launch({ headless: "true", args: ['--no-sandbox', '--disable-setuid-sandbox']  });
     const page = await browser.newPage();
     await page.goto("https://gartic.io");
 
@@ -91,8 +90,10 @@ app.get("/start-factory", async (req, res) => {
     res.send("Factory engine started with maintenance protocols active.");
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+// استبدل app.listen الحالية بهذا:
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
 });
 
 // تشغيل الصيانة التلقائية (كل دقيقة)
